@@ -3,32 +3,40 @@ import torch.nn as nn
 
 #定义一个基本块类，适用于resnet18,34
 class BasicBlock(nn.Module):
-    #expansion = 1  #扩张因子， 主分支卷积核个数不改变
+    expansion = 1
 
     def __init__(self, in_channel, out_channel, stride=1, downsample=None):
         super().__init__()
-        self.conv1 = nn.Conv2d(in_channels=in_channel, out_channels=out_channel,
-                               kernel_size=3, stride=stride, bias=False)
-        self.bn1 = nn.BatchNorm2d(out_channel)
-        self.relu = nn.ReLU()
-        self.conv2 = nn.Conv2d(in_channels=out_channel, out_channels=out_channel,
-                               kernel_size=3, stride=1, padding=2, bias=False)
-        self.bn2 = nn.BatchNorm2d(out_channel)
-        self.downsample = downsample
+        self.baseblock = nn.Sequential(
+            nn.Conv2d(in_channels=in_channel, out_channels=out_channel,
+                    kernel_size=3, stride=stride, bias=False, padding=1),
+            nn.BatchNorm2d(out_channel),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(in_channels=out_channel, out_channels=out_channel,
+                               kernel_size=3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(out_channel)
+        )
+        if downsample is None:
+            if stride != 1 or in_channel != out_channel * self.expansion:
+                self.downsample = nn.Sequential(
+                    nn.Conv2d(in_channels=in_channel, out_channels=out_channel,
+                              kernel_size=1, bias=False),
+                    nn.BatchNorm2d(out_channel)
+                )
+            else:
+                self.downsample = downsample
+        else:
+            self.downsample = downsample
 
     def forward(self, x):
         # 保存输入数据，以便后续残差连接
         identity = x
+        out = self.baseblock(x)
         if self.downsample is not None:
             identity = self.downsample(x)
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
 
-        out = self.conv2(out)
-        out = self.bn2(out)
         out += identity
-        out = self.relu(out)
+        out = nn.ReLU(inplace=True)(out)
         return out
 
 
@@ -37,43 +45,52 @@ class DeepResBlock(nn.Module):
 
     def __init__(self, in_channel, out_channel, stride=1, downsample=None):
         super().__init__()
-        self.conv1 = nn.Conv2d(in_channels=in_channel, out_channels=out_channel,
-                               stride=1, kernel_size=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(out_channel)              #8
-        self.relu = nn.ReLU()
-        self.conv2 = nn.Conv2d(in_channels=out_channel, out_channels=out_channel,
-                               stride=stride, kernel_size=3, padding=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(out_channel)
-        self.conv3 = nn.Conv2d(in_channels=out_channel, out_channels=out_channel*self.expansion,
-                               stride=1, kernel_size=1, bias=False)
-        self.bn3 = nn.BatchNorm2d(out_channel*self.expansion)
         self.downsample = downsample
+        self.bottleblock = nn.Sequential(
+            nn.Conv2d(in_channels=in_channel, out_channels=out_channel // self.expansion,
+                               kernel_size=1, stride=1, bias=False),
+            nn.BatchNorm2d(out_channel // self.expansion),
+            nn.ReLU(inplace=True),  # 使用inplace=True可以减少内存占用
+            nn.Conv2d(in_channels=out_channel // self.expansion, out_channels=out_channel // self.expansion,
+                               kernel_size=3, stride=stride, padding=1, bias=False),
+            nn.BatchNorm2d(out_channel // self.expansion),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(in_channels=out_channel // self.expansion, out_channels=out_channel,
+                               kernel_size=1, stride=1, bias=False),
+            nn.BatchNorm2d(out_channel)
+        )
+        if downsample is None:
+            if stride != 1 or in_channel != out_channel:
+                self.downsample = nn.Sequential(
+                    nn.Conv2d(in_channel, out_channel,
+                              kernel_size=1, stride=stride, bias=False),
+                    nn.BatchNorm2d(out_channel)
+                )
+            else:
+                self.downsample = downsample
+        else:
+            self.downsample = downsample
+
+
 
     def forward(self, x):
         identity = x
+
+        out = self.bottleblock(x)
         if self.downsample is not None:
-            identity = self.downsample(x)
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
-        out = self.conv2(out)
-        out = self.bn2(out)
-        out = self.relu(out)
-        out = self.conv3(out)
-        out = self.bn3(out)
+            identity = self.downsample(identity)
         out += identity
-        out = self.relu(out)
+        out = nn.ReLU(inplace=True)(out)
         return out
 
-x = torch.rand(1, 2, 64, 64)
-print(x.shape)
-baseblock = BasicBlock(2, 2)
-deepblock = DeepResBlock(2, 8)
+
+x = torch.rand(1, 64, 224, 224)
+y = torch.rand(1, 256, 224, 224)
+baseblock = BasicBlock(64, 64)
+deepblock = DeepResBlock(256, 256)
 
 output1 = baseblock(x)
-print(output1)
-print(output1.shape)
+print(output1.shape)  # 应该输出 torch.Size([1, 64, 224, 224])
 
-output2 = deepblock(x)
-print(output2)
-print(output2.shape)
+output2 = deepblock(y)
+print(output2.shape)  # 应该输出 torch.Size([1, 256, 224, 224])
